@@ -83,6 +83,8 @@ struct Params {
     int64_t nStakeMinAge;
     int64_t nStakeMaxAge;
     int64_t nModifierInterval;
+    uint32_t nPowLimitBits;
+    int64_t nPowAllowMinTime;
     int nCoinbaseMaturity;  // Coinbase transaction outputs can only be spent after this number of new blocks (network rule)
 };
 

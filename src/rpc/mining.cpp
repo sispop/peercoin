@@ -173,17 +173,17 @@ static bool GenerateBlock(ChainstateManager& chainman, CBlock& block, uint64_t& 
         LOCK(cs_main);
         IncrementExtraNonce(&block, chainman.ActiveChain().Tip(), extra_nonce);
     }
-
+    uint256 mix_hash;
     CChainParams chainparams(Params());
 
-    while (max_tries > 0 && block.nNonce < std::numeric_limits<uint32_t>::max() && !CheckProofOfWork(block.GetHash(), block.nBits, chainparams.GetConsensus()) && !ShutdownRequested()) {
-        ++block.nNonce;
+    while (max_tries > 0 && block.nNonce64 < std::numeric_limits<uint32_t>::max() && !CheckProofOfWork(block.GetHash(), block.nBits, chainparams.GetConsensus()) && !ShutdownRequested()) {
+        ++block.nNonce64;
         --max_tries;
     }
     if (max_tries == 0 || ShutdownRequested()) {
         return false;
     }
-    if (block.nNonce == std::numeric_limits<uint32_t>::max()) {
+    if (block.nNonce64 == std::numeric_limits<uint32_t>::max()) {
         return true;
     }
 
@@ -787,7 +787,7 @@ static RPCHelpMan getblocktemplate()
 
     // Update nTime
     UpdateTime(pblock);
-    pblock->nNonce = 0;
+    pblock->nNonce64 = 0;
 
     // NOTE: If at some point we support pre-segwit miners post-segwit-activation, this needs to take segwit support into consideration
     const bool fPreSegWit = !IsBTC16BIPsEnabled(active_chain.Tip()->nTime);

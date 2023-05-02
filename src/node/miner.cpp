@@ -228,6 +228,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     if (pblock->IsProofOfWork())
         UpdateTime(pblock);
     pblock->nNonce         = 0;
+    pblock->nNonce64       = 0;
     pblocktemplate->vTxSigOpsCost[0] = WITNESS_SCALE_FACTOR * GetLegacySigOpCount(*pblock->vtx[0]);
 
     BlockValidationState state;

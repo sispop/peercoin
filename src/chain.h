@@ -216,6 +216,8 @@ public:
     //! (memory only) Maximum nTime in the chain up to and including this block.
     unsigned int nTimeMax{0};
 
+    uint64_t nNonce64{0};
+    uint256 mix_hash{};
 // peercoin
     // peercoin: money supply related block index fields
     int64_t nMint{0};
@@ -286,6 +288,8 @@ public:
           nTime{block.nTime},
           nBits{block.nBits},
           nNonce{block.nNonce},
+          nNonce64{block.nNonce64},
+          mix_hash{block.mix_hash},
           nFlags{block.nFlags}
     {
     }
@@ -322,6 +326,8 @@ public:
         block.nTime = nTime;
         block.nBits = nBits;
         block.nNonce = nNonce;
+        block.nNonce64 = nNonce64;
+        block.mix_hash = mix_hash;
         block.nFlags = nFlags;
         return block;
     }
@@ -507,6 +513,8 @@ public:
         READWRITE(obj.nTime);
         READWRITE(obj.nBits);
         READWRITE(obj.nNonce);
+            READWRITE(obj.nNonce64);
+            READWRITE(obj.mix_hash);
     }
 
     uint256 GetBlockHash() const
@@ -518,6 +526,8 @@ public:
         block.nTime = nTime;
         block.nBits = nBits;
         block.nNonce = nNonce;
+        block.nNonce64 = nNonce64;
+        block.mix_hash = mix_hash;
         return block.GetHash();
     }
 

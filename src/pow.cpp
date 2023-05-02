@@ -1,64 +1,91 @@
-// Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2018 The Bitcoin Core developers
-// Distributed under the MIT software license, see the accompanying
-// file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
-#include <pow.h>
-
 #include <arith_uint256.h>
 #include <chain.h>
-#include <primitives/block.h>
-#include <uint256.h>
-
-#include <bignum.h>
-#include <chainparams.h>
 #include <kernel.h>
+#include <bignum.h>
+#include <uint256.h>
+#include <chainparams.h>
+#include "pow.h"
+#include <primitives/block.h>
+#include <crypto/ethash/include/ethash/progpow.hpp>
+#include <crypto/ethash/include/ethash/ethash.hpp>
+#include <crypto/ethash/helpers.hpp>
+#include <openssl/sha.h>
+#include <boost/endian/conversion.hpp>
 
 unsigned int GetNextTargetRequired(const CBlockIndex* pindexLast, bool fProofOfStake, const Consensus::Params& params)
 {
-    if (pindexLast == nullptr)
-        return UintToArith256(params.powLimit).GetCompact(); // genesis block
+    // If we're at the genesis block or the previous block didn't have a valid proof-of-work, return the minimum difficulty
+    if (!pindexLast || !pindexLast->pprev || !pindexLast->IsProofOfWork())
+        return params.nPowLimitBits;
 
-    const CBlockIndex* pindexPrev = GetLastBlockIndex(pindexLast, fProofOfStake);
-    if (pindexPrev->pprev == nullptr)
-        return UintToArith256(params.bnInitialHashTarget).GetCompact(); // first block
-    const CBlockIndex* pindexPrevPrev = GetLastBlockIndex(pindexPrev->pprev, fProofOfStake);
-    if (pindexPrevPrev->pprev == nullptr)
-        return UintToArith256(params.bnInitialHashTarget).GetCompact(); // second block
+    // Get the block headers for the previous two blocks
+    const CBlockHeader& prev_header = pindexLast->GetBlockHeader();
+    const CBlockHeader* pprev = &prev_header;
+    const CBlockHeader& prev_prev_header = pindexLast->pprev->GetBlockHeader();
+    const CBlockHeader* pprev_prev = &prev_prev_header;
+    // Calculate the time elapsed between the previous two blocks
+    int64_t nActualTimespan = pprev->GetBlockTime() - pprev_prev->GetBlockTime();
 
-    int64_t nActualSpacing = pindexPrev->GetBlockTime() - pindexPrevPrev->GetBlockTime();
+    // Limit the time elapsed between blocks to 6 hours
+    int64_t nTargetTimespan = 6 * 60 * 60;
+    if (nActualTimespan < nTargetTimespan / 4)
+        nActualTimespan = nTargetTimespan / 4;
+    if (nActualTimespan > nTargetTimespan * 4)
+        nActualTimespan = nTargetTimespan * 4;
 
-    // rfc20
-    int64_t nHypotheticalSpacing = pindexLast->GetBlockTime() - pindexPrev->GetBlockTime();
-    if (!fProofOfStake && IsProtocolV12(pindexPrev) && (nHypotheticalSpacing > nActualSpacing))
-        nActualSpacing = nHypotheticalSpacing;
-
-    // peercoin: target change every block
-    // peercoin: retarget with exponential moving toward target spacing
+    // Calculate the next difficulty target
+    CBigNum nBit;
+    nBit.SetCompact(pprev->nBits);
     CBigNum bnNew;
-    bnNew.SetCompact(pindexPrev->nBits);
-    if (Params().NetworkIDString() != CBaseChainParams::REGTEST) {
-        int64_t nTargetSpacing;
+    CBigNum bnOld = nBit;
+    bnNew.SetCompact(pindexLast->GetBlockTime() <= params.nPowAllowMinTime ? params.nPowLimitBits : bnOld.GetCompact());
+    bnNew *= nActualTimespan;
+    bnNew /= nTargetTimespan;
 
-        if (fProofOfStake) {
-            nTargetSpacing = params.nStakeTargetSpacing;
-        } else {
-            if (IsProtocolV09(pindexLast->nTime)) {
-                nTargetSpacing = params.nStakeTargetSpacing * 6;
-            } else {
-                nTargetSpacing = std::min(params.nTargetSpacingWorkMax, params.nStakeTargetSpacing * (1 + pindexLast->nHeight - pindexPrev->nHeight));
-            }
-        }
+    // Limit the difficulty adjustment to 400%
+    if (bnNew > bnOld * 4)
+        bnNew = bnOld * 4;
 
-        int64_t nInterval = params.nTargetTimespan / nTargetSpacing;
-        bnNew *= ((nInterval - 1) * nTargetSpacing + nActualSpacing + nActualSpacing);
-        bnNew /= ((nInterval + 1) * nTargetSpacing);
-        }
+    // Calculate the KAWPOW hash of the previous block
+    uint256 mix_hash;
+    const uint256 pow_hash = KAWPOWHash(*pprev, mix_hash);
 
-    if (bnNew > CBigNum(params.powLimit))
-        bnNew = CBigNum(params.powLimit);
+    // Calculate the hash of the previous block's header using the SHA-512 algorithm
+    unsigned char hash[SHA512_DIGEST_LENGTH];
+    SHA512_CTX sha512;
+    SHA512_Init(&sha512);
+    SHA512_Update(&sha512, &pprev->nVersion, sizeof(pprev->nVersion));
+    SHA512_Update(&sha512, &pprev->hashPrevBlock, sizeof(pprev->hashPrevBlock));
+    SHA512_Update(&sha512, &pprev->hashMerkleRoot, sizeof(pprev->hashMerkleRoot));
+    SHA512_Update(&sha512, &pprev->nTime, sizeof(pprev->nTime));
+    SHA512_Update(&sha512, &bnOld, sizeof(bnOld));
+    SHA512_Update(&sha512, &pow_hash, sizeof(pow_hash));
+    SHA512_Final(hash, &sha512);
 
-    return bnNew.GetCompact();
+    // Use the first 4 bytes of the SHA-512 hash as the new difficulty target
+    uint32_t nBits = *reinterpret_cast<uint32_t*>(hash);
+
+    // Convert the target to a compact representation
+    CBigNum target;
+    target.SetCompact(nBits);
+
+// Limit the difficulty adjustment to 1/4 or 4x of the previous target
+CBigNum bnOldCompact = CBigNum(bnOld.GetCompact());
+CBigNum bnMin = bnOldCompact / CBigNum(4);
+
+if (bnNew < bnMin) {
+bnNew = bnMin;
+}
+else if (bnNew > bnOld * 4) {
+bnNew = bnOld * 4;
+}
+
+// Compute the new target
+
+    CBigNum bnNewTarget;
+   bnNewTarget.SetCompact(bnNew.GetCompact());
+
+    return bnNewTarget.GetCompact();
 }
 
 bool CheckProofOfWork(uint256 hash, unsigned int nBits, const Consensus::Params& params)
@@ -79,3 +106,4 @@ bool CheckProofOfWork(uint256 hash, unsigned int nBits, const Consensus::Params&
 
     return true;
 }
+

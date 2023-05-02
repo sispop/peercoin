@@ -10,13 +10,21 @@
 #include <deploymentinfo.h>
 #include <hash.h> // for signet block challenge hash
 #include <util/system.h>
-
+#include <crypto/ethash/include/ethash/ethash.hpp>
+#include <crypto/ethash/include/ethash/keccak.hpp>
+#include <crypto/ethash/helpers.hpp>
+#include <arith_uint256.h>
+#include <bignum.h>
 #include <assert.h>
-
+#include "crypto/ethash/include/ethash/ethash.h"
+#include "crypto/ethash/lib/ethash/ethash-internal.hpp"
+#include "crypto/ethash/include/ethash/progpow.hpp"
+#include "uint256.h"
+#include "serialize.h"
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
 
-static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesisOutputScript, uint32_t nTimeTx, uint32_t nTimeBlock, uint32_t nNonce, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
+static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesisOutputScript, uint32_t nTimeTx, uint32_t nTimeBlock, uint32_t nNonce64, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
 {
     CMutableTransaction txNew;
     txNew.nVersion = 1;
@@ -30,11 +38,13 @@ static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesi
     CBlock genesis;
     genesis.nTime    = nTimeBlock;
     genesis.nBits    = nBits;
-    genesis.nNonce   = nNonce;
+    //genesis.nNonce   = nNonce;
+    genesis.nNonce64   = nNonce64;
     genesis.nVersion = nVersion;
     genesis.vtx.push_back(MakeTransactionRef(std::move(txNew)));
     genesis.hashPrevBlock.SetNull();
     genesis.hashMerkleRoot = BlockMerkleRoot(genesis);
+
     return genesis;
 }
 
@@ -49,11 +59,11 @@ static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesi
  *     CTxOut(nValue=50.00000000, scriptPubKey=0x5F1DF16B2B704C8A578D0B)
  *   vMerkleTree: 4a5e1e
  */
-static CBlock CreateGenesisBlock(uint32_t nTimeTx, uint32_t nTimeBlock, uint32_t nNonce, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
+static CBlock CreateGenesisBlock(uint32_t nTimeTx, uint32_t nTimeBlock,  uint32_t nNonce64, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
 {
     const char* pszTimestamp = "Matonis 07-AUG-2012 Parallel Currencies And The Roadmap To Monetary Freedom";
     const CScript genesisOutputScript = CScript();
-    return CreateGenesisBlock(pszTimestamp, genesisOutputScript, nTimeTx, nTimeBlock, nNonce, nBits, nVersion, genesisReward);
+    return CreateGenesisBlock(pszTimestamp, genesisOutputScript, nTimeTx, nTimeBlock,  nNonce64, nBits, nVersion, genesisReward);
 }
 
 /**
@@ -70,7 +80,7 @@ public:
         consensus.BIP34Hash = uint256S("000000000000000237f50af4cfe8924e8693abc5bd8ae5abb95bc6d230f5953f");
         consensus.powLimit =            uint256S("00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff"); // ~arith_uint256(0) >> 32;
         consensus.bnInitialHashTarget = uint256S("0000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffff"); // ~arith_uint256(0) >> 40;
-
+        consensus.nPowLimitBits = 0x1d00ffff;
         consensus.nTargetTimespan = 7 * 24 * 60 * 60;  // one week
         consensus.nStakeTargetSpacing = 10 * 60; // 10-minute block spacing
         consensus.nTargetSpacingWorkMax = 12 * consensus.nStakeTargetSpacing; // 2-hour
@@ -79,7 +89,7 @@ public:
         consensus.nStakeMaxAge = 60 * 60 * 24 * 90;
         consensus.nModifierInterval = 6 * 60 * 60; // Modifier interval: time to elapse before new modifier is computed
         consensus.nCoinbaseMaturity = 500;
-
+        consensus.nPowAllowMinTime = 60;
         consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 1815; // 90% of 2016
@@ -87,8 +97,8 @@ public:
 
         consensus.SegwitHeight = 455470;
 
-        consensus.nMinimumChainWork = uint256S("0x00000000000000000000000000000000000000000000000000516e58fb3669ea"); // 650000
-        consensus.defaultAssumeValid = uint256S("0x3125be5493e80431952593cce42b160019671108103735509238830939e1c9a3");  // 650000
+        consensus.nMinimumChainWork = uint256S("0x"); // 650000
+        consensus.defaultAssumeValid = uint256S("");  // 650000
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
@@ -103,20 +113,61 @@ public:
         nPruneAfterHeight = 100000;
         m_assumed_blockchain_size = 2;
 
-        genesis = CreateGenesisBlock(1345083810, 1345084287, 2179302059u, 0x1d00ffff, 1, 0);
+//        genesis = CreateGenesisBlock(1345083810, 1345084287, 2179302059u, 0x1d00ffff, 1, 0);
+//        genesis = CreateGenesisBlock(1345083810, 1345084287, 2179302059u, 0x1d00ffff, 1, 0);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256S("0x0000000032fe677166d54963b62a4677d8957e87c508eaa4fd7eb1c880cd27e3"));
-        assert(genesis.hashMerkleRoot == uint256S("0x3c2d8f85fab4d17aac558cc648a1a58acff0de6deb890c29985690052c5993c2"));
+  //      assert(consensus.hashGenesisBlock == uint256S("0x0000000032fe677166d54963b62a4677d8957e87c508eaa4fd7eb1c880cd27e3"));
+    //    assert(genesis.hashMerkleRoot == uint256S("0x3c2d8f85fab4d17aac558cc648a1a58acff0de6deb890c29985690052c5993c2"));
+
+
+
+        uint32_t nTimeBlock = 1345083810;
+        uint32_t nTimeTx = 1345084287;
+        uint256 hashGenesisBlock = uint256S("0x0000f8186df4648c46f445a25decd423fa6b62ed220849093f73f6f364116894");
+        uint256 hashMerkleRoot = uint256S("0x1cfd43bb319d060a2124fcb5ffd711df5532838032881c9058aea9680224bd1a");
+        uint32_t nNonce64 = 0;
+
+        genesis = CreateGenesisBlock(nTimeBlock, nTimeTx, nNonce64, 0x1d00ffff, 1, 0);
+        consensus.hashGenesisBlock = genesis.GetHash();
+
+        if (true && (genesis.GetHash() != hashGenesisBlock || genesis.hashMerkleRoot != hashMerkleRoot))
+{
+    printf("recalculating params for testnet.\n");
+    printf("old testnet genesis nonce: %lu\n", static_cast<unsigned long>(genesis.nNonce64));
+    printf("old testnet genesis hash:  %s\n", hashGenesisBlock.ToString().c_str());
+
+    arith_uint256 hashTarget = UintToArith256(consensus.powLimit);
+
+    // Recalculate the nonce for the genesis block until the block's hash is below the proof of work limit
+    while (UintToArith256(genesis.GetHash()) > hashTarget) {
+        ++genesis.nNonce64;
+    }
+
+    printf("new testnet genesis merkle root: %s\n", genesis.hashMerkleRoot.ToString().c_str());
+    printf("new testnet genesis nonce: %lu\n", static_cast<unsigned long>(genesis.nNonce64));
+    printf("new testnet genesis hash: %s\n", genesis.GetHash().ToString().c_str());
+}
+
+
+       /* if (true && (genesis.GetHash() != hashGenesisBlock || genesis.hashMerkleRoot != hashMerkleRoot))
+        {
+            printf("recalculating params for testnet.\n");
+            printf("old testnet genesis nonce: %d\n", genesis.nNonce);
+            printf("old testnet genesis hash:  %s\n", hashGenesisBlock.ToString().c_str());
+
+
+          //  for(; genesis.GetHash() > consensus.powLimit; genesis.nNonce++){ }
+            printf("new testnet genesis merkle root: %s\n", genesis.hashMerkleRoot.ToString().c_str());
+            printf("new testnet genesis nonce: %d\n", genesis.nNonce);
+            printf("new testnet genesis hash: %s\n", genesis.GetHash().ToString().c_str());
+        }*/
 
         // Note that of those which support the service bits prefix, most only support a subset of
         // possible options.
         // This is fine at runtime as we'll fall back to using them as an addrfetch if they don't support the
         // service bits we want, but we should get them updated to support all service bits wanted by any
         // release ASAP to avoid it where possible.
-        vSeeds.emplace_back("seed.peercoin.net");
-        vSeeds.emplace_back("seed2.peercoin.net");
-        vSeeds.emplace_back("seed.peercoin-library.org");
-        vSeeds.emplace_back("seed.ppcoin.info");
+        vSeeds.emplace_back("seed.quagba.tech");
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,55);  // peercoin: addresses begin with 'P'
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,117); // peercoin: addresses begin with 'p'
@@ -137,19 +188,7 @@ public:
 
         checkpointData = {
             {
-                {     0, uint256S("0x0000000032fe677166d54963b62a4677d8957e87c508eaa4fd7eb1c880cd27e3")},
-                { 19080, uint256S("0x000000000000bca54d9ac17881f94193fd6a270c1bb21c3bf0b37f588a40dbd7")},
-                { 30583, uint256S("0xd39d1481a7eecba48932ea5913be58ad3894c7ee6d5a8ba8abeb772c66a6696e")},
-                { 99999, uint256S("0x27fd5e1de16a4270eb8c68dee2754a64da6312c7c3a0e99a7e6776246be1ee3f")},
-                {219999, uint256S("0xab0dad4b10d2370f009ed6df6effca1ba42f01d5070d6b30afeedf6463fbe7a2")},
-                {336000, uint256S("0x4d261cef6e61a5ed8325e560f1d6e36f4698853a4c7134677f47a1d1d842bdf6")},
-                {371850, uint256S("0x6b18adcb0a6e080dae85b74eee2b83fabb157bbea64fab0ed2192b2f6d5b89f3")},
-                {407813, uint256S("0x00000000000000012730b0f48bed8afbeb08164c9d63597afb082e82ea05cec9")},
-                {443561, uint256S("0xf81cea8e4e40b2cfcc13a8bd82436399c35a55df951b95e7128601c1838029ed")},
-                {455470, uint256S("0xd1472c26229f90b8589d331aa47ba9023cb953b92dce342c753e7a6b3431bf1e")},
-                {479189, uint256S("0xc9c065028b20a23fbb9627bbca5946c7497f11e1f72433d4d215c79047cf06f2")},
-                {504051, uint256S("0xff65454ebdf1d89174bec10a3c016db92f7b1d9a4759603472842f254be8d7b3")},
-                {589659, uint256S("0x967c14abf21214639aeff0a270c4543cd3b80fe53178384ac5aa3c277662f1d0")},
+                {     0, uint256S("0x")},
             }
         };
 

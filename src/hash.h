@@ -14,7 +14,7 @@
 #include <serialize.h>
 #include <uint256.h>
 #include <version.h>
-
+#include <primitives/block.h>
 #include <string>
 #include <vector>
 
@@ -212,6 +212,7 @@ void BIP32Hash(const ChainCode &chainCode, unsigned int nChild, unsigned char he
  */
 CHashWriter TaggedHash(const std::string& tag);
 
+uint256 KAWPOWHash(const CBlockHeader& blockHeader, uint256& mix_hash);
 extern int32_t peercoinRandseed;
 int univHash(const uint256 &x);
 

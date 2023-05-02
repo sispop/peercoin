@@ -6,7 +6,10 @@
 #include <span.h>
 #include <crypto/common.h>
 #include <crypto/hmac_sha512.h>
-
+#include <crypto/ethash/include/ethash/progpow.hpp>
+#include <crypto/ethash/helpers.hpp>
+#include <openssl/sha.h>
+#include <primitives/block.h>
 #include <string>
 
 inline uint32_t ROTL32(uint32_t x, int8_t r)
@@ -102,4 +105,35 @@ int univHash(const uint256 &x) {
   for(int i = 0; i < 8; i++)
     h ^=  (p[i] >> (h & 0xf)) + (peercoinRandseed >> i);
   return (h + (h >> 16))  & 1023; // 2^n - 1
+}
+
+uint256 KAWPOWHash(const CBlockHeader& blockHeader, uint256& mix_hash)
+{
+    static ethash::epoch_context_ptr context{nullptr, nullptr};
+
+    // Get the context from the block height
+    const auto epoch_number = ethash::get_epoch_number(blockHeader.nHeight);
+
+    if (!context || context->epoch_number != epoch_number)
+        context = ethash::create_epoch_context(epoch_number);
+
+    // Build the header_hash
+    uint256 nHeaderHash = blockHeader.GetHash();
+    unsigned char header_hash[SHA512_DIGEST_LENGTH];
+    SHA512_CTX ctx;
+    SHA512_Init(&ctx);
+    SHA512_Update(&ctx, nHeaderHash.begin(), nHeaderHash.size());
+    SHA512_Final(header_hash, &ctx);
+
+    // ProgPow hash
+//    const auto result = progpow::hash(*context, blockHeader.nHeight, header_hash, blockHeader.nNonce64);
+ //   const auto result = progpow::hash(*static_cast<const ethash_epoch_context*>(context.get()), blockHeader.nHeight, header_hash, blockHeader.nNonce64);
+//    mix_hash = uint256S(to_hex(result.mix_hash));
+ //   return uint256S(to_hex(result.final_hash));
+
+ethash::hash256 ethash_header_hash;
+memcpy(&ethash_header_hash, &header_hash, sizeof(ethash_header_hash));
+const auto result = progpow::hash(*static_cast<const ethash_epoch_context*>(context.get()), blockHeader.nHeight, ethash_header_hash, blockHeader.nNonce64);
+    mix_hash = uint256S(to_hex(result.mix_hash));
+    return uint256S(to_hex(result.final_hash));
 }

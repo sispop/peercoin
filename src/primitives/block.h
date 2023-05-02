@@ -27,6 +27,9 @@ public:
     uint32_t nTime;
     uint32_t nBits;
     uint32_t nNonce;
+    uint32_t nHeight;
+    uint64_t nNonce64;
+    uint256 mix_hash;
 
     // peercoin: A copy from CBlockIndex.nFlags from other clients. We need this information because we are using headers-first syncronization.
     uint32_t nFlags;
@@ -41,8 +44,9 @@ public:
 
     SERIALIZE_METHODS(CBlockHeader, obj)
     {
-        READWRITE(obj.nVersion, obj.hashPrevBlock, obj.hashMerkleRoot, obj.nTime, obj.nBits, obj.nNonce);
+//        READWRITE(obj.nVersion, obj.hashPrevBlock, obj.hashMerkleRoot, obj.nTime, obj.nBits, obj.nNonce);
         // peercoin: do not serialize nFlags when computing hash
+            READWRITE(obj.nHeight, obj.nNonce64, obj.mix_hash);
         if (!(s.GetType() & SER_GETHASH) && s.GetType() & SER_POSMARKER)
             READWRITE(obj.nFlags);
     }
@@ -55,6 +59,9 @@ public:
         nTime = 0;
         nBits = 0;
         nNonce = 0;
+        nNonce64 = 0;
+        nHeight = 0;
+        mix_hash.SetNull();
         nFlags = 0;
     }
 
@@ -65,6 +72,7 @@ public:
 
     uint256 GetHash() const;
 
+  //  uint256 GetValidationHash(uint256& mixHash) const;
     int64_t GetBlockTime() const
     {
         return (int64_t)nTime;
@@ -181,6 +189,24 @@ struct CBlockLocator
     bool IsNull() const
     {
         return vHave.empty();
+    }
+};
+
+/**
+ * Custom serializer for CBlockHeader that omits the nNonce and mixHash, for use
+ * as input to ProgPow.
+ */
+class CKAWPOWInput : private CBlockHeader
+{
+public:
+    CKAWPOWInput(const CBlockHeader &header)
+    {
+        CBlockHeader::SetNull();
+        *((CBlockHeader*)this) = header;
+    }
+
+    SERIALIZE_METHODS(CKAWPOWInput, obj) { 
+        READWRITE(obj.nVersion, obj.hashPrevBlock, obj.hashMerkleRoot, obj.nTime, obj.nBits, obj.nHeight);
     }
 };
 
